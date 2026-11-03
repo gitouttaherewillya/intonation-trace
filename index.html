@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Intonation Trace</title>
+  <meta name="description" content="Real-time intonation trace for violin, viola and cello practice.">
+  <meta name="theme-color" content="#f6f5f2" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#16171a" media="(prefers-color-scheme: dark)">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 20 C8 8 12 28 18 16 S26 12 30 16' fill='none' stroke='%232f5fd0' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <button id="toggle" class="primary" type="button">Start</button>
+    <select id="instrument" aria-label="Instrument">
+      <option value="violin">Violin</option>
+      <option value="viola">Viola</option>
+      <option value="cello">Cello</option>
+    </select>
+    <label class="ref">A4 <input id="ref" type="number" min="400" max="480" step="0.5" inputmode="decimal"><span class="unit">Hz</span></label>
+    <span class="spacer"></span>
+    <button id="pause" type="button" disabled title="Pause (space)">Pause</button>
+    <button id="settingsBtn" type="button" aria-expanded="false" aria-controls="settings" aria-label="Settings"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="label">Settings</span></button>
+  </header>
+
+  <section id="settings" class="settings" hidden>
+    <label>Open strings
+      <select id="tuning">
+        <option value="pure">Pure fifths</option>
+        <option value="equal">Equal temperament</option>
+      </select>
+    </label>
+    <label>In-tune zone <output id="toleranceOut"></output>
+      <input id="tolerance" type="range" min="2" max="15" step="1">
+    </label>
+    <label>Time window <output id="windowOut"></output>
+      <input id="window" type="range" min="3" max="30" step="1">
+    </label>
+    <label>Mic sensitivity <output id="gateOut"></output>
+      <input id="gate" type="range" min="-80" max="-20" step="1">
+      <span class="meter" aria-hidden="true"><span id="levelBar"></span><span id="gateMark"></span></span>
+    </label>
+  </section>
+
+  <div class="readout" aria-live="off">
+    <div class="note"><span id="noteName">–</span><span id="noteOct"></span></div>
+    <div id="cents" class="cents"></div>
+    <div id="freq" class="freq"></div>
+  </div>
+
+  <main class="charts">
+    <canvas id="pitchChart" aria-label="Pitch over time, with open strings as reference lines"></canvas>
+    <canvas id="centsChart" aria-label="Cents sharp or flat of the nearest note over time"></canvas>
+  </main>
+
+  <div id="overlay" class="overlay">
+    <div class="card">
+      <h1>Intonation Trace</h1>
+      <p>Play and watch your pitch drawn in real time — <span class="flat">red</span> when flat, <span class="sharp">blue</span> when sharp, plain when in tune.</p>
+      <p class="small">Audio is analysed on this device and never recorded or sent anywhere.</p>
+      <div class="actions">
+        <button id="startBig" class="primary" type="button">Start listening</button>
+        <button id="demoBtn" type="button">Watch a demo</button>
+      </div>
+      <p id="error" class="error" role="alert"></p>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
