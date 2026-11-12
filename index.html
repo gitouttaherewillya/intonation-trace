@@ -24,6 +24,15 @@
     <button id="settingsBtn" type="button" aria-expanded="false" aria-controls="settings" aria-label="Settings"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="label">Settings</span></button>
   </header>
 
+  <section id="player" class="player" hidden aria-label="Play back last take">
+    <span class="player-label">Last take</span>
+    <button id="playBtn" type="button" aria-label="Play"><svg class="icon icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4v16l13-8z"/></svg><svg class="icon icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h3v16H7zM14 4h3v16h-3z"/></svg></button>
+    <input id="scrub" type="range" min="0" max="1" step="0.01" value="0" aria-label="Position in take">
+    <span id="playTime" class="time">0:00 / 0:00</span>
+    <a id="saveTake" class="btn" download>Save</a>
+    <button id="closeTake" type="button" aria-label="Discard take" title="Discard take">✕</button>
+  </section>
+
   <section id="settings" class="settings" hidden>
     <label>Open strings
       <select id="tuning">
@@ -50,6 +59,7 @@
         <option value="0">Only when I leave the page</option>
       </select>
     </label>
+    <label class="check"><input id="record" type="checkbox"> Keep last take for playback</label>
   </section>
 
   <div class="readout" aria-live="off">
@@ -77,10 +87,11 @@
     <div class="card">
       <h1>Intonation Trace</h1>
       <p>Play and watch your pitch drawn in real time — <span class="tune">green</span> when in tune, <span class="flat">red</span> when flat, <span class="sharp">blue</span> when sharp.</p>
-      <p class="small">Audio is analysed on this device and never recorded or sent anywhere.</p>
+      <p class="small">Audio never leaves this device. Your last take is kept here so you can play it back, and is replaced when you start again.</p>
       <div class="actions">
         <button id="startBig" class="primary" type="button">Start listening</button>
         <button id="demoBtn" type="button">Watch a demo</button>
+        <button id="reviewBtn" type="button" hidden>Play back last take</button>
       </div>
       <p id="notice" class="notice" role="status"></p>
       <p id="error" class="error" role="alert"></p>

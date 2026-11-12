@@ -6,13 +6,14 @@ const INSTRUMENTS = {
   viola: [48, 55, 62, 69],  // C3 G3 D4 A4
   cello: [36, 43, 50, 57],  // C2 G2 D3 A3
 };
-const DEFAULTS = { instrument: 'violin', ref: 440, tuning: 'pure', tolerance: 5, window: 8, gate: -55, autoStop: 10 };
+const DEFAULTS = { instrument: 'violin', ref: 440, tuning: 'pure', tolerance: 5, window: 8, gate: -55, autoStop: 10, record: true };
 const STORAGE_KEY = 'intonation-trace-settings';
 const BUF_SIZE = 2048;
 const MAX_FREQ = 2600;
 const MIN_CLARITY = 0.8;
 const CENTS_RANGE = 50;
 const VIBRATO_WINDOW = 0.36; // s, about two vibrato cycles
+const ONSET_SETTLE = 0.045; // s, one analysis window
 const RIGHT_GUTTER = 92; // px kept free on the right of each chart for live labels
 
 const $ = (id) => document.getElementById(id);
@@ -92,6 +93,8 @@ let history = [];   // { t, midi|null, db }
 let recentRaw = []; // { t, midi } raw detections for median smoothing
 let lastDb = -100;
 let lastPlayedAt = 0;
+let recorder = null; // MediaRecorder for the take in progress
+let take = null;     // { url, t0, duration } of the last finished take; its pitches stay in `history`
 
 async function start(useDemo) {
   $('error').textContent = '';
@@ -110,7 +113,10 @@ async function start(useDemo) {
     audio = { ctx, analyser, stream };
     if (stream) {
       ctx.createMediaStreamSource(stream).connect(analyser);
+      discardTake();
+      if (settings.record && typeof MediaRecorder !== 'undefined') startRecording(stream);
     } else {
+      discardTake();
       audio.demo = createDemo(ctx, analyser);
     }
     await ctx.resume();
@@ -123,6 +129,7 @@ async function start(useDemo) {
   }
   history = [];
   recentRaw = [];
+  prevSmoothed = null;
   lastPlayedAt = performance.now() / 1000;
   setPaused(false);
   setMuted(true);
@@ -136,6 +143,7 @@ async function start(useDemo) {
 
 // Stops listening; a notice brings the start screen back explaining why.
 function stop(notice = '') {
+  if (recorder) finishRecording();
   if (audio) {
     audio.stream?.getTracks().forEach((t) => t.stop());
     audio.ctx.close();
@@ -263,10 +271,13 @@ function tick() {
       const r = detect(buf, audio.ctx.sampleRate, lowest * 0.8, MAX_FREQ);
       if (r && r.clarity > MIN_CLARITY) midi = freqToMidi(r.freq);
     }
-    const smoothed = smooth(now, midi);
+    const smoothed = settle(now, smooth(now, midi));
     history.push({ t: now, midi: smoothed, db, centre: vibratoCentre(now, smoothed) });
-    const cutoff = now - settings.window - 1;
-    while (history.length && history[0].t < cutoff) history.shift();
+    if (!recorder) {
+      // A take keeps its whole history for playback; otherwise only what is on screen is kept
+      const cutoff = now - settings.window - 1;
+      while (history.length && history[0].t < cutoff) history.shift();
+    }
     if (midi !== null) lastPlayedAt = now;
   } else if (db > settings.gate) {
     lastPlayedAt = now;
@@ -295,19 +306,118 @@ function smooth(now, midi) {
   return sorted[Math.floor(sorted.length / 2)];
 }
 
-// The average pitch over the last couple of vibrato cycles of the current note. Intonation is
-// judged (and coloured) by this, since a vibrato swings either side of the note being aimed at.
+// The first frames of a new note are analysed with a window that still holds the silence or note
+// before it, which reads several cents out (usually sharp), so they are held back until it has filled.
+let prevSmoothed = null, noteStart = 0;
+function settle(now, midi) {
+  if (midi !== null && (prevSmoothed === null || Math.abs(midi - prevSmoothed) > 0.7)) noteStart = now;
+  prevSmoothed = midi;
+  return midi !== null && now - noteStart >= ONSET_SETTLE ? midi : null;
+}
+
+// The middle pitch over the last couple of vibrato cycles of the current note. Intonation is
+// judged (and coloured) by this, since a vibrato swings either side of the note being aimed at;
+// a median keeps a stray reading from dragging it.
 function vibratoCentre(now, midi) {
   if (midi === null) return null;
-  let sum = midi, n = 1;
+  const recent = [midi];
   for (let i = history.length - 1; i >= 0; i--) {
     const s = history[i];
     if (s.midi === null || now - s.t > VIBRATO_WINDOW || Math.abs(s.midi - midi) > 0.7) break;
-    sum += s.midi;
-    n++;
+    recent.push(s.midi);
   }
-  return sum / n;
+  recent.sort((a, b) => a - b);
+  return recent[Math.floor(recent.length / 2)];
 }
+
+// ---------- recording and playback ----------
+
+function startRecording(stream) {
+  const chunks = [];
+  const rec = new MediaRecorder(stream);
+  rec.t0 = performance.now() / 1000;
+  rec.onstart = () => { rec.t0 = performance.now() / 1000; };
+  rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    if (rec.discarded) return;
+    const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+    setTake({ url: URL.createObjectURL(blob), mime: blob.type, t0: rec.t0, duration: rec.t1 - rec.t0 });
+  };
+  rec.start(1000);
+  recorder = rec;
+}
+
+function finishRecording() {
+  recorder.t1 = performance.now() / 1000;
+  recorder.stop();
+  recorder = null;
+}
+
+const player = new Audio();
+player.preload = 'auto';
+
+function setTake(t) {
+  take = t;
+  player.src = t.url;
+  const ext = t.mime.includes('mp4') ? 'm4a' : t.mime.includes('ogg') ? 'ogg' : 'webm';
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(':', '.');
+  $('saveTake').href = t.url;
+  $('saveTake').download = `Intonation take ${stamp}.${ext}`;
+  $('scrub').max = t.duration;
+  $('player').hidden = false;
+  $('reviewBtn').hidden = false;
+  showTakeAt(t.duration);
+}
+
+function discardTake() {
+  if (recorder) {
+    recorder.discarded = true;
+    finishRecording();
+  }
+  if (!take) return;
+  player.pause();
+  player.removeAttribute('src');
+  URL.revokeObjectURL(take.url);
+  take = null;
+  $('player').hidden = true;
+  $('reviewBtn').hidden = true;
+}
+
+const clock = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+// Draws the charts as they were at `pos` seconds into the take.
+function showTakeAt(pos) {
+  $('scrub').value = pos;
+  $('playTime').textContent = `${clock(pos)} / ${clock(take.duration)}`;
+  draw(take.t0 + pos);
+}
+
+function togglePlayback() {
+  if (!take || audio) return;
+  if (player.paused) {
+    if (Number($('scrub').value) >= take.duration - 0.05) player.currentTime = 0;
+    player.play();
+  } else {
+    player.pause();
+  }
+}
+
+function playbackTick() {
+  if (!take || player.paused) return;
+  showTakeAt(Math.min(player.currentTime, take.duration));
+  requestAnimationFrame(playbackTick);
+}
+
+player.addEventListener('play', () => {
+  $('playBtn').classList.add('playing');
+  $('playBtn').setAttribute('aria-label', 'Pause');
+  requestAnimationFrame(playbackTick);
+});
+player.addEventListener('pause', () => {
+  $('playBtn').classList.remove('playing');
+  $('playBtn').setAttribute('aria-label', 'Play');
+});
+player.addEventListener('ended', () => { if (take) showTakeAt(take.duration); });
 
 function setPaused(value) {
   paused = value;
@@ -456,11 +566,22 @@ function drawCents(now) {
   }
 }
 
-// Consecutive stretches of history (up to `now`) where each neighbouring pair satisfies `joined`.
+// Index of the first sample at or after time t (history is in time order).
+function indexAt(t) {
+  let lo = 0, hi = history.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (history[mid].t < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+// Consecutive stretches of the visible history (up to `now`) where each neighbouring pair satisfies `joined`.
 function runs(now, joined) {
   const out = [];
   let run = [];
-  for (let i = 0; i < history.length && history[i].t <= now; i++) {
+  for (let i = indexAt(now - settings.window - 0.2); i < history.length && history[i].t <= now; i++) {
     const s = history[i];
     if (run.length && !joined(run[run.length - 1], s)) {
       if (run.length > 1) out.push(run);
@@ -480,9 +601,9 @@ function runGradient(ctx, run, xs) {
   return g;
 }
 
-// The newest sample if it is recent enough to count as the note still sounding.
+// The sample at `now` if it is recent enough to count as the note still sounding.
 function latest(now) {
-  const last = history[history.length - 1];
+  const last = history[indexAt(now + 1e-6) - 1];
   return last && last.midi !== null && now - last.t < 0.15 ? last : null;
 }
 
@@ -534,6 +655,7 @@ function releaseWakeLock() {
 // Never leave the microphone open in the background: stop as soon as the page is hidden
 // (switching apps, locking the phone, changing tab).
 document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') player.pause();
   if (document.visibilityState === 'hidden' && audio) {
     stop(audio.demo ? '' : 'Listening stopped when you left the page. Start again whenever you’re ready.');
   }
@@ -553,7 +675,7 @@ function bindSetting(id, key, format, parse = Number) {
     settings[key] = v;
     if (out) out.textContent = format(v);
     saveSettings();
-    if (!audio) draw(performance.now() / 1000);
+    redraw();
   });
 }
 
@@ -567,27 +689,51 @@ bindSetting('tolerance', 'tolerance', (v) => `±${v} cents`);
 bindSetting('window', 'window', (v) => `${v} s`);
 bindSetting('gate', 'gate', (v) => `${v} dB`);
 bindSetting('autoStop', 'autoStop', String);
+$('record').checked = settings.record;
+$('record').addEventListener('change', () => {
+  settings.record = $('record').checked;
+  saveSettings();
+});
 
 $('toggle').addEventListener('click', () => (audio ? stop() : start(false)));
 $('startBig').addEventListener('click', () => start(false));
 $('demoBtn').addEventListener('click', () => start(true));
 $('pause').addEventListener('click', () => setPaused(!paused));
 $('mute').addEventListener('click', () => setMuted(!muted));
+$('playBtn').addEventListener('click', togglePlayback);
+$('scrub').addEventListener('input', () => {
+  const pos = Number($('scrub').value);
+  player.currentTime = pos;
+  showTakeAt(pos);
+});
+$('closeTake').addEventListener('click', () => {
+  discardTake();
+  history = [];
+  draw(performance.now() / 1000);
+});
+$('reviewBtn').addEventListener('click', () => { $('overlay').hidden = true; });
 $('settingsBtn').addEventListener('click', () => {
   const panel = $('settings');
   panel.hidden = !panel.hidden;
   $('settingsBtn').setAttribute('aria-expanded', String(!panel.hidden));
 });
 document.addEventListener('keydown', (e) => {
-  if (e.code === 'Space' && audio && !['INPUT', 'SELECT', 'BUTTON'].includes(e.target.tagName)) {
+  if (e.code === 'Space' && !['INPUT', 'SELECT', 'BUTTON'].includes(e.target.tagName)) {
     e.preventDefault();
-    setPaused(!paused);
+    if (audio) setPaused(!paused);
+    else togglePlayback();
   }
 });
 
 const darkQuery = matchMedia('(prefers-color-scheme: dark)');
-darkQuery.addEventListener('change', () => { readPalette(); if (!audio) draw(performance.now() / 1000); });
-new ResizeObserver(() => { if (!audio) draw(performance.now() / 1000); }).observe(document.querySelector('.charts'));
+// Redraw when idle (live listening and playback redraw every frame anyway)
+const redraw = () => {
+  if (audio) return;
+  if (take) showTakeAt(Number($('scrub').value));
+  else draw(performance.now() / 1000);
+};
+darkQuery.addEventListener('change', () => { readPalette(); redraw(); });
+new ResizeObserver(redraw).observe(document.querySelector('.charts'));
 
 readPalette();
 draw(performance.now() / 1000);
