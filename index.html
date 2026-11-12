@@ -13,6 +13,7 @@
 <body>
   <header class="bar">
     <button id="toggle" class="primary" type="button">Start</button>
+    <span id="recBadge" class="rec-badge" hidden title="Recordings stay in this browser, are visible only to you, and are never uploaded. They are cleared when you close the page or record again.">● <span class="label">Rec</span></span>
     <select id="instrument" aria-label="Instrument">
       <option value="violin">Violin</option>
       <option value="viola">Viola</option>
@@ -59,7 +60,10 @@
         <option value="0">Only when I leave the page</option>
       </select>
     </label>
-    <label class="check"><input id="record" type="checkbox"> Keep last take for playback</label>
+    <div class="check-group">
+      <label class="check" title="Recordings stay in this browser, are visible only to you, and are never uploaded. They are cleared when you close the page or record again."><input id="record" type="checkbox"> Record sessions for playback</label>
+      <span class="hint">Recordings stay in this browser, are visible only to you, and are never uploaded. They are cleared when you close the page or record again.</span>
+    </div>
   </section>
 
   <div class="readout" aria-live="off">
@@ -87,7 +91,9 @@
     <div class="card">
       <h1>Intonation Trace</h1>
       <p>Play and watch your pitch drawn in real time — <span class="tune">green</span> when in tune, <span class="flat">red</span> when flat, <span class="sharp">blue</span> when sharp.</p>
-      <p class="small">Audio never leaves this device. Your last take is kept here so you can play it back, and is replaced when you start again.</p>
+      <p class="small">Audio is analysed on this device and never leaves it.</p>
+      <label class="check" title="Recordings stay in this browser, are visible only to you, and are never uploaded. They are cleared when you close the page or record again."><input id="recordStart" type="checkbox"> Record this session so I can play it back</label>
+      <p class="small hint">Recordings stay in this browser, are visible only to you, and are never uploaded. They are cleared when you close the page or record again.</p>
       <div class="actions">
         <button id="startBig" class="primary" type="button">Start listening</button>
         <button id="demoBtn" type="button">Watch a demo</button>

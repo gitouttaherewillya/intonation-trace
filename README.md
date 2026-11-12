@@ -17,7 +17,7 @@ Open the GitHub Pages site, press **Start listening** and allow microphone acces
 - **Instrument** sets the open-string reference lines and the lowest pitch the detector looks for.
 - **A4** sets the reference pitch (e.g. 442).
 - **Pause** (or the space bar) freezes the display so you can look at a passage.
-- **Playback**: each time you listen, the take is recorded on your device. Press **Stop** and a playback bar appears. Play it back to hear yourself with the trace and charts scrolling in sync, drag the slider to any moment, or **Save** the recording as an audio file. Starting again replaces the take, and ✕ discards it. Turn this off in Settings with *Keep last take for playback*.
+- **Playback** (optional, off by default): tick *Record this session so I can play it back* on the start screen, or *Record sessions for playback* in Settings. A red **● Rec** badge shows while recording. Press **Stop** and a playback bar appears. Play it back to hear yourself with the trace and charts scrolling in sync, drag the slider to any moment, or **Save** the recording as an audio file. Recordings stay in your browser, are visible only to you, and are never uploaded. They are cleared when you close the page or record again, and ✕ discards one straight away.
 - **Settings**
   - *Open strings*: draw the string lines in pure 3:2 fifths tuned from the A string, which is how string players tune, or in equal temperament.
   - *Green (in-tune) zone*: how many cents either side of a note counts as in tune (default ±5, about the smallest difference most people can hear on a sustained note).

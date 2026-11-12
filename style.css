@@ -102,8 +102,14 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
   background: var(--surface);
 }
 .settings[hidden] { display: none; }
-.settings label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; }
-.settings label.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+label.check { display: flex; flex-direction: row; align-items: center; gap: 8px; color: var(--ink); font-size: 14px; cursor: pointer; }
+label.check input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+.settings label.check { flex-direction: row; color: var(--ink); font-size: 14px; }
+.check-group { display: flex; flex-direction: column; gap: 4px; }
+.hint { color: var(--muted); font-size: 12px; }
+.card .hint { margin: 4px 0 0 26px; font-size: 12px; }
+.rec-badge { color: var(--flat); font-size: 13px; font-weight: 600; white-space: nowrap; cursor: help; }
+.rec-badge[hidden] { display: none; }
 
 .btn { display: inline-flex; align-items: center; color: inherit; text-decoration: none; }
 .player {
@@ -231,7 +237,7 @@ button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px s
 #settingsBtn { display: inline-flex; align-items: center; gap: 6px; }
 .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 @media (max-width: 440px) {
-  .ref .unit, #settingsBtn .label, .player-label { display: none; }
+  .ref .unit, #settingsBtn .label, .player-label, .rec-badge .label { display: none; }
   .ref input { width: 4em; }
   button, select { padding: 6px 10px; }
 }

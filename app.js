@@ -6,7 +6,7 @@ const INSTRUMENTS = {
   viola: [48, 55, 62, 69],  // C3 G3 D4 A4
   cello: [36, 43, 50, 57],  // C2 G2 D3 A3
 };
-const DEFAULTS = { instrument: 'violin', ref: 440, tuning: 'pure', tolerance: 5, window: 8, gate: -55, autoStop: 10, record: true };
+const DEFAULTS = { instrument: 'violin', ref: 440, tuning: 'pure', tolerance: 5, window: 8, gate: -55, autoStop: 10, recordTakes: false };
 const STORAGE_KEY = 'intonation-trace-settings';
 const BUF_SIZE = 2048;
 const MAX_FREQ = 2600;
@@ -114,7 +114,7 @@ async function start(useDemo) {
     if (stream) {
       ctx.createMediaStreamSource(stream).connect(analyser);
       discardTake();
-      if (settings.record && typeof MediaRecorder !== 'undefined') startRecording(stream);
+      if (settings.recordTakes && typeof MediaRecorder !== 'undefined') startRecording(stream);
     } else {
       discardTake();
       audio.demo = createDemo(ctx, analyser);
@@ -345,12 +345,14 @@ function startRecording(stream) {
   };
   rec.start(1000);
   recorder = rec;
+  $('recBadge').hidden = false;
 }
 
 function finishRecording() {
   recorder.t1 = performance.now() / 1000;
   recorder.stop();
   recorder = null;
+  $('recBadge').hidden = true;
 }
 
 const player = new Audio();
@@ -689,11 +691,16 @@ bindSetting('tolerance', 'tolerance', (v) => `±${v} cents`);
 bindSetting('window', 'window', (v) => `${v} s`);
 bindSetting('gate', 'gate', (v) => `${v} dB`);
 bindSetting('autoStop', 'autoStop', String);
-$('record').checked = settings.record;
-$('record').addEventListener('change', () => {
-  settings.record = $('record').checked;
-  saveSettings();
-});
+// Recording is opt-in, from either the start screen or Settings; both boxes stay in step.
+// It takes effect the next time listening starts.
+for (const id of ['record', 'recordStart']) {
+  $(id).checked = settings.recordTakes;
+  $(id).addEventListener('change', () => {
+    settings.recordTakes = $(id).checked;
+    $('record').checked = $('recordStart').checked = settings.recordTakes;
+    saveSettings();
+  });
+}
 
 $('toggle').addEventListener('click', () => (audio ? stop() : start(false)));
 $('startBig').addEventListener('click', () => start(false));
