@@ -31,7 +31,7 @@
         <option value="equal">Equal temperament</option>
       </select>
     </label>
-    <label>In-tune zone <output id="toleranceOut"></output>
+    <label>Green (in-tune) zone <output id="toleranceOut"></output>
       <input id="tolerance" type="range" min="2" max="15" step="1">
     </label>
     <label>Time window <output id="windowOut"></output>
@@ -41,28 +41,48 @@
       <input id="gate" type="range" min="-80" max="-20" step="1">
       <span class="meter" aria-hidden="true"><span id="levelBar"></span><span id="gateMark"></span></span>
     </label>
+    <label>Stop listening after
+      <select id="autoStop">
+        <option value="5">5 min without playing</option>
+        <option value="10">10 min without playing</option>
+        <option value="20">20 min without playing</option>
+        <option value="30">30 min without playing</option>
+        <option value="0">Only when I leave the page</option>
+      </select>
+    </label>
   </section>
 
   <div class="readout" aria-live="off">
     <div class="note"><span id="noteName">–</span><span id="noteOct"></span></div>
     <div id="cents" class="cents"></div>
+    <div id="tuner" class="tuner idle" aria-hidden="true">
+      <span class="side">♭ flat</span>
+      <div class="scale"><div id="zone" class="zone"></div><div class="center"></div><div id="needle" class="needle"></div></div>
+      <span class="side">sharp ♯</span>
+    </div>
     <div id="freq" class="freq"></div>
   </div>
 
   <main class="charts">
     <canvas id="pitchChart" aria-label="Pitch over time, with open strings as reference lines"></canvas>
     <canvas id="centsChart" aria-label="Cents sharp or flat of the nearest note over time"></canvas>
+    <button id="mute" class="mute" type="button" hidden aria-pressed="true">
+      <svg class="icon icon-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m23 9-6 6M17 9l6 6"/></svg>
+      <svg class="icon icon-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></svg>
+      <span class="label">Sound off</span>
+    </button>
   </main>
 
   <div id="overlay" class="overlay">
     <div class="card">
       <h1>Intonation Trace</h1>
-      <p>Play and watch your pitch drawn in real time — <span class="flat">red</span> when flat, <span class="sharp">blue</span> when sharp, plain when in tune.</p>
+      <p>Play and watch your pitch drawn in real time — <span class="tune">green</span> when in tune, <span class="flat">red</span> when flat, <span class="sharp">blue</span> when sharp.</p>
       <p class="small">Audio is analysed on this device and never recorded or sent anywhere.</p>
       <div class="actions">
         <button id="startBig" class="primary" type="button">Start listening</button>
         <button id="demoBtn" type="button">Watch a demo</button>
       </div>
+      <p id="notice" class="notice" role="status"></p>
       <p id="error" class="error" role="alert"></p>
     </div>
   </div>

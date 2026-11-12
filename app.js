@@ -6,12 +6,13 @@ const INSTRUMENTS = {
   viola: [48, 55, 62, 69],  // C3 G3 D4 A4
   cello: [36, 43, 50, 57],  // C2 G2 D3 A3
 };
-const DEFAULTS = { instrument: 'violin', ref: 440, tuning: 'pure', tolerance: 5, window: 8, gate: -55 };
+const DEFAULTS = { instrument: 'violin', ref: 440, tuning: 'pure', tolerance: 5, window: 8, gate: -55, autoStop: 10 };
 const STORAGE_KEY = 'intonation-trace-settings';
 const BUF_SIZE = 2048;
 const MAX_FREQ = 2600;
 const MIN_CLARITY = 0.8;
 const CENTS_RANGE = 50;
+const VIBRATO_WINDOW = 0.36; // s, about two vibrato cycles
 const RIGHT_GUTTER = 92; // px kept free on the right of each chart for live labels
 
 const $ = (id) => document.getElementById(id);
@@ -59,7 +60,7 @@ function readPalette() {
   const get = (name) => css.getPropertyValue(name).trim();
   palette = {
     plot: get('--plot'), ink: get('--ink'), muted: get('--muted'), grid: get('--grid'),
-    line: get('--line'), band: get('--band'), flat: get('--flat'), sharp: get('--sharp'),
+    line: get('--line'), band: get('--band'), flat: get('--flat'), sharp: get('--sharp'), tune: get('--tune'),
   };
   palette.inkRgb = hexToRgb(palette.ink);
   palette.flatRgb = hexToRgb(palette.flat);
@@ -70,11 +71,11 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-// Plain ink inside the in-tune zone, fading to red (flat) or blue (sharp) by 30 cents off.
+// Green inside the in-tune zone; outside it red (flat) or blue (sharp), deepening up to 25 cents off.
 function centsColour(cents) {
   const off = Math.abs(cents) - settings.tolerance;
-  if (off <= 0) return palette.ink;
-  const t = Math.min(1, off / (30 - settings.tolerance));
+  if (off <= 0) return palette.tune;
+  const t = 0.45 + 0.55 * Math.min(1, off / Math.max(1, 25 - settings.tolerance));
   const target = cents < 0 ? palette.flatRgb : palette.sharpRgb;
   const [r, g, b] = palette.inkRgb.map((v, i) => Math.round(v + (target[i] - v) * t));
   return `rgb(${r},${g},${b})`;
@@ -90,9 +91,11 @@ let frozenAt = 0;
 let history = [];   // { t, midi|null, db }
 let recentRaw = []; // { t, midi } raw detections for median smoothing
 let lastDb = -100;
+let lastPlayedAt = 0;
 
 async function start(useDemo) {
   $('error').textContent = '';
+  $('notice').textContent = '';
   try {
     let stream = null;
     if (!useDemo) {
@@ -108,12 +111,7 @@ async function start(useDemo) {
     if (stream) {
       ctx.createMediaStreamSource(stream).connect(analyser);
     } else {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.connect(gain).connect(analyser); // analysed only, never played aloud
-      osc.start();
-      audio.demo = { osc, gain, t0: ctx.currentTime };
+      audio.demo = createDemo(ctx, analyser);
     }
     await ctx.resume();
   } catch (err) {
@@ -125,7 +123,10 @@ async function start(useDemo) {
   }
   history = [];
   recentRaw = [];
+  lastPlayedAt = performance.now() / 1000;
   setPaused(false);
+  setMuted(true);
+  $('mute').hidden = !audio.demo;
   $('overlay').hidden = true;
   $('toggle').textContent = 'Stop';
   $('pause').disabled = false;
@@ -133,7 +134,8 @@ async function start(useDemo) {
   requestAnimationFrame(tick);
 }
 
-function stop() {
+// Stops listening; a notice brings the start screen back explaining why.
+function stop(notice = '') {
   if (audio) {
     audio.stream?.getTracks().forEach((t) => t.stop());
     audio.ctx.close();
@@ -141,29 +143,111 @@ function stop() {
   audio = null;
   $('toggle').textContent = 'Start';
   $('pause').disabled = true;
+  $('mute').hidden = true;
   releaseWakeLock();
+  if (notice) {
+    $('notice').textContent = notice;
+    $('overlay').hidden = false;
+  }
 }
 
-// A scale with deliberate intonation slips and vibrato, so the display can be tried without an instrument.
-const DEMO_STEPS = [0, 2, 4, 5, 7, 9, 11, 12, 11, 9, 7, 5, 4, 2];
-function updateDemo() {
-  const { osc, gain, t0 } = audio.demo;
-  const t = audio.ctx.currentTime - t0;
-  const NOTE_LEN = 1.4;
-  const step = Math.floor(t / NOTE_LEN);
-  const phase = t - step * NOTE_LEN;
-  const seed = Math.sin(step * 12.9898) * 43758.5453;
-  const slip = ((seed - Math.floor(seed)) - 0.5) * 50; // ±25 cents
-  const vibrato = 12 * Math.sin(2 * Math.PI * 5.5 * t) * Math.min(1, Math.max(0, (phase - 0.5) * 2));
-  const cents = slip * Math.exp(-phase * 2.2) + vibrato;
-  const midi = INSTRUMENTS[settings.instrument][1] + DEMO_STEPS[step % DEMO_STEPS.length] + cents / 100;
-  osc.frequency.setTargetAtTime(midiToFreq(midi), audio.ctx.currentTime, 0.005);
-  gain.gain.setTargetAtTime(phase > NOTE_LEN - 0.15 ? 0 : 0.3, audio.ctx.currentTime, 0.01);
+// ---------- demo ----------
+
+// A short original tune, played with notes that land out of tune and are corrected, plus vibrato,
+// so the display can be tried without an instrument. [semitones above the second string, beats]
+const DEMO_TUNE = [
+  [0, 1], [4, 1], [7, 1], [12, 1], [11, 1], [9, 1], [7, 2],
+  [9, 1], [11, 1], [12, 1], [14, 1], [16, 2], [14, 1], [12, 1],
+  [12, 1], [9, 1], [5, 1], [7, 2], [4, 1], [2, 1], [0, 3],
+];
+const BEAT = 0.5;
+const BODY_SCALE = { violin: 1, viola: 0.8, cello: 0.45 };
+const rand = (n) => { const x = Math.sin(n * 12.9898) * 43758.5453; return x - Math.floor(x); };
+
+// A bowed string vibrates close to a sawtooth. The speakers hear it through filters standing in for
+// the instrument's body resonances, plus a little room reverb; the detector hears the plain tone.
+function createDemo(ctx, analyser) {
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  const env = ctx.createGain();
+  env.gain.value = 0;
+  const lfo = ctx.createOscillator();
+  lfo.frequency.value = 5.5;
+  const vib = ctx.createGain(); // vibrato depth in cents
+  vib.gain.value = 0;
+  lfo.connect(vib).connect(osc.detune);
+  osc.connect(env).connect(analyser);
+
+  const k = BODY_SCALE[settings.instrument];
+  const filters = [
+    ['highpass', openStrings()[0].freq * 0.7, 0.7, 0],
+    ['peaking', 280 * k, 2, 5],
+    ['peaking', 500 * k, 3, 4],
+    ['peaking', 2600 * k, 1.2, 4],
+    ['lowpass', 4500 * Math.sqrt(k), 0.5, 0],
+    ['lowpass', 4500 * Math.sqrt(k), 0.5, 0],
+  ].map(([type, frequency, Q, gain]) => new BiquadFilterNode(ctx, { type, frequency, Q, gain }));
+  filters.reduce((prev, f) => prev.connect(f), env);
+  const body = filters[filters.length - 1];
+
+  const out = ctx.createGain(); // master volume, which is also the mute
+  out.gain.value = 0;
+  const reverb = new ConvolverNode(ctx, { buffer: roomImpulse(ctx) });
+  const wet = new GainNode(ctx, { gain: 0.35 });
+  body.connect(out);
+  body.connect(reverb).connect(wet).connect(out);
+  out.connect(ctx.destination);
+
+  osc.start();
+  lfo.start();
+  return { osc, env, vib, out, next: ctx.currentTime + 0.2, i: 0 };
+}
+
+function roomImpulse(ctx, seconds = 1.8) {
+  const len = Math.floor(ctx.sampleRate * seconds);
+  const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len) ** 4;
+  }
+  return ir;
+}
+
+// Schedules the tune a little ahead of the audio clock.
+function scheduleDemo() {
+  const d = audio.demo;
+  while (d.next < audio.ctx.currentTime + 0.4) {
+    const [step, beats] = DEMO_TUNE[d.i % DEMO_TUNE.length];
+    const start = d.next, dur = beats * BEAT;
+    const midi = INSTRUMENTS[settings.instrument][1] + step;
+    const onset = (rand(d.i * 2) - 0.5) * 50; // lands up to ±25 cents out...
+    const settle = (rand(d.i * 2 + 1) - 0.5) * 16; // ...then is corrected to within ±8
+    const freq = (cents) => midiToFreq(midi + cents / 100);
+    d.osc.frequency.setTargetAtTime(freq(onset), start, 0.012);
+    d.osc.frequency.setTargetAtTime(freq(settle), start + 0.06, 0.22);
+    d.env.gain.setTargetAtTime(0.3, start, 0.04);
+    d.env.gain.setTargetAtTime(0.22, start + 0.2, 0.25);
+    d.env.gain.setTargetAtTime(0, start + dur - 0.07, beats >= 3 ? 0.15 : 0.025);
+    d.vib.gain.setValueAtTime(0, start);
+    d.vib.gain.setValueAtTime(0, start + Math.min(0.3, dur * 0.4));
+    d.vib.gain.linearRampToValueAtTime(beats > 1 ? 14 : 6, start + Math.min(0.8, dur - 0.05));
+    d.next += dur;
+    d.i++;
+    if (d.i % DEMO_TUNE.length === 0) d.next += 2 * BEAT;
+  }
+}
+
+let muted = true;
+function setMuted(value) {
+  muted = value;
+  if (audio?.demo) audio.demo.out.gain.setTargetAtTime(muted ? 0 : 0.7, audio.ctx.currentTime, 0.05);
+  $('mute').setAttribute('aria-pressed', String(muted));
+  $('mute').querySelector('.label').textContent = muted ? 'Sound off' : 'Sound on';
 }
 
 function tick() {
   if (!audio) return;
-  if (audio.demo) updateDemo();
+  if (audio.demo) scheduleDemo();
   audio.analyser.getFloatTimeDomainData(buf);
   const now = performance.now() / 1000;
 
@@ -179,9 +263,18 @@ function tick() {
       const r = detect(buf, audio.ctx.sampleRate, lowest * 0.8, MAX_FREQ);
       if (r && r.clarity > MIN_CLARITY) midi = freqToMidi(r.freq);
     }
-    history.push({ t: now, midi: smooth(now, midi), db });
+    const smoothed = smooth(now, midi);
+    history.push({ t: now, midi: smoothed, db, centre: vibratoCentre(now, smoothed) });
     const cutoff = now - settings.window - 1;
     while (history.length && history[0].t < cutoff) history.shift();
+    if (midi !== null) lastPlayedAt = now;
+  } else if (db > settings.gate) {
+    lastPlayedAt = now;
+  }
+
+  if (!audio.demo && settings.autoStop > 0 && now - lastPlayedAt > settings.autoStop * 60) {
+    stop(`Listening stopped after ${settings.autoStop} minutes without playing.`);
+    return;
   }
 
   draw(paused ? frozenAt : now);
@@ -200,6 +293,20 @@ function smooth(now, midi) {
   if (recentRaw.length < 2) return null;
   const sorted = recentRaw.map((r) => r.midi).sort((a, b) => a - b);
   return sorted[Math.floor(sorted.length / 2)];
+}
+
+// The average pitch over the last couple of vibrato cycles of the current note. Intonation is
+// judged (and coloured) by this, since a vibrato swings either side of the note being aimed at.
+function vibratoCentre(now, midi) {
+  if (midi === null) return null;
+  let sum = midi, n = 1;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const s = history[i];
+    if (s.midi === null || now - s.t > VIBRATO_WINDOW || Math.abs(s.midi - midi) > 0.7) break;
+    sum += s.midi;
+    n++;
+  }
+  return sum / n;
 }
 
 function setPaused(value) {
@@ -342,7 +449,7 @@ function drawCents(now) {
 
   const last = latest(now);
   if (last) {
-    const cents = centsOff(last.midi);
+    const cents = centsOff(last.centre);
     ctx.fillStyle = centsColour(cents);
     ctx.font = '600 15px system-ui, sans-serif';
     ctx.fillText(formatCents(cents), plotW + 10, y(cents));
@@ -369,7 +476,7 @@ function runs(now, joined) {
 function runGradient(ctx, run, xs) {
   const x0 = xs[0], span = Math.max(1, xs[xs.length - 1] - x0);
   const g = ctx.createLinearGradient(x0, 0, x0 + span, 0);
-  run.forEach((s, i) => g.addColorStop(Math.min(1, Math.max(0, (xs[i] - x0) / span)), centsColour(centsOff(s.midi))));
+  run.forEach((s, i) => g.addColorStop(Math.min(1, Math.max(0, (xs[i] - x0) / span)), centsColour(centsOff(s.centre))));
   return g;
 }
 
@@ -384,11 +491,19 @@ function formatCents(cents) {
   return r === 0 ? '±0' : `${r > 0 ? '+' : '−'}${Math.abs(r)}`;
 }
 
+let needleCents = 0;
 function updateReadout(now) {
   const last = latest(now);
+  $('tuner').classList.toggle('idle', !last);
+  $('zone').style.left = `${50 - settings.tolerance}%`;
+  $('zone').style.width = `${2 * settings.tolerance}%`;
   if (last) {
     const m = Math.round(last.midi);
-    const cents = centsOff(last.midi);
+    const cents = centsOff(last.centre);
+    // Eased so vibrato reads as a gentle sway rather than a blur
+    needleCents += (cents - needleCents) * 0.35;
+    $('needle').style.left = `${50 + Math.max(-50, Math.min(50, needleCents))}%`;
+    $('needle').style.background = centsColour(needleCents);
     $('noteName').textContent = NOTE_NAMES[pitchClass(m)];
     $('noteOct').textContent = octaveOf(m);
     $('cents').textContent = `${formatCents(cents)}¢`;
@@ -415,9 +530,15 @@ function releaseWakeLock() {
   wakeLock?.release().catch(() => {});
   wakeLock = null;
 }
+
+// Never leave the microphone open in the background: stop as soon as the page is hidden
+// (switching apps, locking the phone, changing tab).
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && audio) requestWakeLock();
+  if (document.visibilityState === 'hidden' && audio) {
+    stop(audio.demo ? '' : 'Listening stopped when you left the page. Start again whenever you’re ready.');
+  }
 });
+window.addEventListener('pagehide', () => stop());
 
 // ---------- controls ----------
 
@@ -445,11 +566,13 @@ bindSetting('ref', 'ref', String, (v) => {
 bindSetting('tolerance', 'tolerance', (v) => `±${v} cents`);
 bindSetting('window', 'window', (v) => `${v} s`);
 bindSetting('gate', 'gate', (v) => `${v} dB`);
+bindSetting('autoStop', 'autoStop', String);
 
 $('toggle').addEventListener('click', () => (audio ? stop() : start(false)));
 $('startBig').addEventListener('click', () => start(false));
 $('demoBtn').addEventListener('click', () => start(true));
 $('pause').addEventListener('click', () => setPaused(!paused));
+$('mute').addEventListener('click', () => setMuted(!muted));
 $('settingsBtn').addEventListener('click', () => {
   const panel = $('settings');
   panel.hidden = !panel.hidden;
