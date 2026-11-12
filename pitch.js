@@ -40,6 +40,17 @@ export function createDetector(bufferSize) {
     }
     if (tau < 0) return null;
 
+    // Octave check: when the odd overtones are weak (a low note through small speakers, say) the
+    // waveform nearly repeats every half period, so the first dip lands an octave high. If that dip
+    // is only a fair match and the one at twice the lag is clearly better, that is the real period.
+    // Only below 500 Hz: that is where it happens, and short lags are too coarse to compare reliably.
+    const tau2 = 2 * tau;
+    if (d[tau] > 0.05 && sampleRate / tau < 500 && tau2 + 3 <= tauMax) {
+      let m = tau2;
+      for (let t = tau2 - 3; t <= tau2 + 3; t++) if (d[t] < d[m]) m = t;
+      if (d[m] < 0.65 * d[tau]) tau = m;
+    }
+
     // Parabolic interpolation on the raw difference function for sub-sample accuracy
     const a = raw[tau - 1], b = raw[tau], c = raw[tau + 1];
     const denom = a + c - 2 * b;
